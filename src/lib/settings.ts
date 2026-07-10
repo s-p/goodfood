@@ -9,6 +9,14 @@ export interface Settings {
   snapOnLaunch: boolean;
   /** Appearance: follow the OS, or force light/dark. */
   theme: ThemePref;
+  /** GitHub token for cloud backup to a private repo ("" = disabled). */
+  githubToken: string;
+  /** Private repo name that holds the backup. */
+  backupRepo: string;
+  /** Optional passphrase — encrypts the backup before upload. */
+  backupPassphrase: string;
+  /** Back up automatically a few seconds after every change. */
+  backupAuto: boolean;
 }
 
 const KEY = "goodfood.settings";
@@ -19,6 +27,10 @@ export const DEFAULT_SETTINGS: Settings = {
   checkinDelayMin: 30,
   snapOnLaunch: false,
   theme: "system",
+  githubToken: "",
+  backupRepo: "goodfood-backup",
+  backupPassphrase: "",
+  backupAuto: true,
 };
 
 export const MODEL_OPTIONS = [

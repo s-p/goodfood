@@ -3,43 +3,9 @@ import { useStore } from "../store";
 import { MODEL_OPTIONS } from "../lib/settings";
 import { ensureNotificationPermission, showCheckinNotification } from "../lib/notify";
 import { db } from "../lib/db";
-import type { Checkin, Entry } from "../lib/types";
-
-const MEALS = ["breakfast", "lunch", "dinner", "snack"];
-
-/** Imports come from arbitrary files — validate before they enter the DB. */
-function isValidEntry(e: unknown): e is Entry {
-  const x = e as Partial<Entry> | null;
-  return (
-    !!x &&
-    typeof x.id === "string" &&
-    x.id.length > 0 &&
-    typeof x.eatenAt === "number" &&
-    isFinite(x.eatenAt) &&
-    typeof x.createdAt === "number" &&
-    MEALS.includes(x.mealType as string) &&
-    (x.source === "photo" || x.source === "text") &&
-    typeof x.status === "string"
-  );
-}
-
-function isValidCheckin(c: unknown): c is Checkin {
-  const x = c as Partial<Checkin> | null;
-  return (
-    !!x &&
-    typeof x.id === "string" &&
-    x.id.length > 0 &&
-    Array.isArray(x.entryIds) &&
-    x.entryIds.every((i) => typeof i === "string") &&
-    typeof x.at === "number" &&
-    isFinite(x.at) &&
-    typeof x.energy === "number" &&
-    x.energy >= 1 &&
-    x.energy <= 5 &&
-    Array.isArray(x.symptoms) &&
-    x.symptoms.every((s: unknown) => typeof s === "string")
-  );
-}
+import type { Entry } from "../lib/types";
+import { isValidCheckin, isValidEntry } from "../lib/validate";
+import { loadBackupStatus, runBackup, runRestore } from "../lib/backup";
 
 export function SettingsScreen({ onOpenGuide }: { onOpenGuide: () => void }) {
   const { settings, updateSettings, entries, checkins } = useStore();
@@ -47,6 +13,44 @@ export function SettingsScreen({ onOpenGuide }: { onOpenGuide: () => void }) {
   const importRef = useRef<HTMLInputElement>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [delayDraft, setDelayDraft] = useState(String(settings.checkinDelayMin));
+  const [backupMsg, setBackupMsg] = useState<string | null>(() => {
+    const s = loadBackupStatus();
+    if (s.lastSuccessAt) {
+      return `Last backup: ${new Date(s.lastSuccessAt).toLocaleString()}`;
+    }
+    return s.lastError ? `Last attempt failed: ${s.lastError}` : null;
+  });
+  const [backupBusy, setBackupBusy] = useState(false);
+
+  async function backupNow() {
+    setBackupBusy(true);
+    try {
+      setBackupMsg(await runBackup(settings));
+    } catch (err) {
+      setBackupMsg(err instanceof Error ? err.message : "Backup failed.");
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  async function restoreNow() {
+    if (
+      !confirm(
+        "Restore from the cloud backup? Existing records stay; missing ones are added.",
+      )
+    ) {
+      return;
+    }
+    setBackupBusy(true);
+    try {
+      const r = await runRestore(settings);
+      setBackupMsg(`Restored ${r.added} records${r.skipped ? `, skipped ${r.skipped} malformed` : ""}. Reloading…`);
+      setTimeout(() => location.reload(), 900);
+    } catch (err) {
+      setBackupMsg(err instanceof Error ? err.message : "Restore failed.");
+      setBackupBusy(false);
+    }
+  }
 
   async function testNotification() {
     const ok = await ensureNotificationPermission();
@@ -245,6 +249,91 @@ export function SettingsScreen({ onOpenGuide }: { onOpenGuide: () => void }) {
         <button className="btn quiet block" style={{ marginTop: 12 }} onClick={onOpenGuide}>
           📱 iPhone setup guide (Action Button & notifications)
         </button>
+      </div>
+
+      <div className="section-label">Cloud backup</div>
+      <div className="card card-pad">
+        <p style={{ margin: "0 0 4px", fontSize: 13.5, color: "var(--ink-2)" }}>
+          Backs up to a <b>private repo in your own GitHub account</b> — no
+          third-party server. Photos are not included; secrets never are.
+        </p>
+        <div className="field">
+          <label>GitHub token</label>
+          <input
+            type="password"
+            value={settings.githubToken}
+            placeholder="ghp_… or github_pat_…"
+            autoComplete="off"
+            onChange={(e) =>
+              updateSettings({ ...settings, githubToken: e.target.value.trim() })
+            }
+          />
+          <div className="field-hint">
+            github.com → Settings → Developer settings → Personal access tokens.
+            Easiest: a classic token with only the <code>repo</code> scope — the
+            app then creates the private repo below by itself.
+          </div>
+        </div>
+        <div className="field">
+          <label>Repository name</label>
+          <input
+            type="text"
+            value={settings.backupRepo}
+            placeholder="goodfood-backup"
+            onChange={(e) =>
+              updateSettings({ ...settings, backupRepo: e.target.value.trim() })
+            }
+          />
+        </div>
+        <div className="field">
+          <label>Passphrase (optional, recommended)</label>
+          <input
+            type="password"
+            value={settings.backupPassphrase}
+            autoComplete="off"
+            placeholder="Encrypts the backup on your phone before upload"
+            onChange={(e) =>
+              updateSettings({ ...settings, backupPassphrase: e.target.value })
+            }
+          />
+          <div className="field-hint">
+            With a passphrase, GitHub only ever stores ciphertext — but if you
+            lose it, the backup can't be restored. Write it down.
+          </div>
+        </div>
+        <div className="switch-row">
+          <div>
+            <div className="title">Automatic backup</div>
+            <div className="sub">A few seconds after every change.</div>
+          </div>
+          <button
+            className={`toggle${settings.backupAuto ? " on" : ""}`}
+            role="switch"
+            aria-checked={settings.backupAuto}
+            onClick={() =>
+              updateSettings({ ...settings, backupAuto: !settings.backupAuto })
+            }
+          />
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+          <button
+            className="btn quiet"
+            style={{ flex: 1 }}
+            disabled={backupBusy || !settings.githubToken}
+            onClick={backupNow}
+          >
+            {backupBusy ? "Working…" : "Back up now"}
+          </button>
+          <button
+            className="btn quiet"
+            style={{ flex: 1 }}
+            disabled={backupBusy || !settings.githubToken}
+            onClick={restoreNow}
+          >
+            Restore
+          </button>
+        </div>
+        {backupMsg && <div className="notice">{backupMsg}</div>}
       </div>
 
       <div className="section-label">Your data</div>

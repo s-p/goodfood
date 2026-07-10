@@ -58,11 +58,21 @@ export function GuideScreen({ onBack }: { onBack: () => void }) {
         <div className="guide-step">
           <div className="guide-num">4</div>
           <p>
-            If “Open App” doesn't list GoodFood on your iOS version, use the{" "}
-            <b>“Open URLs”</b> action instead with this address:{" "}
-            <code>{`${location.origin}${location.pathname}?a=snap`}</code>. Note:
-            that opens Safari, whose data is separate from the installed app —
-            prefer “Open App” when available.
+            <b>GoodFood missing from the app list?</b> That's common with web
+            apps. In order: open GoodFood once from the Home Screen · force-quit
+            the Shortcuts app and reopen · in the picker, <b>scroll</b> to G
+            instead of typing in search (search often skips web apps) · restart
+            the iPhone.
+          </p>
+        </div>
+        <div className="guide-step">
+          <div className="guide-num">5</div>
+          <p>
+            <b>Still missing?</b> Your iOS only lists native apps there. Best
+            alternative: put the GoodFood icon <b>in the Dock</b> — with “Open
+            camera on launch” that's exactly one tap to the camera. (Avoid the
+            “Open URLs” action: it opens Safari, and iOS keeps Safari's data
+            separate from the installed app.)
           </p>
         </div>
       </div>
