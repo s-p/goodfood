@@ -21,6 +21,7 @@ import {
 } from "./lib/notify";
 import { loadSettings, saveSettings, type Settings } from "./lib/settings";
 import { applyTheme } from "./lib/theme";
+import { runBackup } from "./lib/backup";
 import { fmtDayTime } from "./lib/format";
 
 interface NewEntryInput {
@@ -121,6 +122,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [entries, checkedIds, tick, settings.checkinDelayMin],
   );
+
+  // Auto-backup: a few seconds after the last local change, push a snapshot
+  // to the user's private GitHub repo (when configured). Debounced so a
+  // burst of edits becomes one upload; only fires after real mutations,
+  // never for the initial load.
+  const backupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backedUpSeq = useRef(0);
+  useEffect(() => {
+    const s = loadSettings();
+    if (!ready || !s.backupAuto || !s.githubToken) return;
+    if (mutationSeq.current === backedUpSeq.current) return;
+    if (backupTimer.current) clearTimeout(backupTimer.current);
+    backupTimer.current = setTimeout(() => {
+      const seqAtStart = mutationSeq.current;
+      runBackup(loadSettings())
+        .then(() => {
+          backedUpSeq.current = seqAtStart;
+        })
+        .catch(() => {
+          /* status is recorded by runBackup; retried on the next change */
+        });
+    }, 10_000);
+    return () => {
+      if (backupTimer.current) clearTimeout(backupTimer.current);
+    };
+  }, [entries, checkins, ready, settings.backupAuto, settings.githubToken]);
 
   // Keep foreground timers armed for every entry still awaiting its check-in.
   useEffect(() => {
