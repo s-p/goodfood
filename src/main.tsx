@@ -2,6 +2,11 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./styles.css";
+import { applyTheme, watchSystemTheme } from "./lib/theme";
+import { loadSettings } from "./lib/settings";
+
+applyTheme(loadSettings().theme);
+watchSystemTheme(() => loadSettings().theme);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

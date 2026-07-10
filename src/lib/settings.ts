@@ -1,3 +1,5 @@
+import type { ThemePref } from "./theme";
+
 export interface Settings {
   apiKey: string;
   model: string;
@@ -5,6 +7,8 @@ export interface Settings {
   checkinDelayMin: number;
   /** Open the camera immediately when the app launches (action-button flow). */
   snapOnLaunch: boolean;
+  /** Appearance: follow the OS, or force light/dark. */
+  theme: ThemePref;
 }
 
 const KEY = "goodfood.settings";
@@ -14,6 +18,7 @@ export const DEFAULT_SETTINGS: Settings = {
   model: "claude-opus-4-8",
   checkinDelayMin: 30,
   snapOnLaunch: false,
+  theme: "system",
 };
 
 export const MODEL_OPTIONS = [
