@@ -200,6 +200,30 @@ export function SettingsScreen({ onOpenGuide }: { onOpenGuide: () => void }) {
         {notifStatus && <div className="notice">{notifStatus}</div>}
       </div>
 
+      <div className="section-label">Appearance</div>
+      <div className="card card-pad">
+        <div className="seg">
+          {(
+            [
+              ["system", "System"],
+              ["light", "Light"],
+              ["dark", "Dark"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              className={settings.theme === value ? "active" : ""}
+              onClick={() => updateSettings({ ...settings, theme: value })}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="field-hint">
+          System follows your phone's light/dark setting.
+        </p>
+      </div>
+
       <div className="section-label">Quick capture</div>
       <div className="card card-pad">
         <div className="switch-row" style={{ padding: "2px 0" }}>

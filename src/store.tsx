@@ -20,6 +20,7 @@ import {
   updateAppBadge,
 } from "./lib/notify";
 import { loadSettings, saveSettings, type Settings } from "./lib/settings";
+import { applyTheme } from "./lib/theme";
 import { fmtDayTime } from "./lib/format";
 
 interface NewEntryInput {
@@ -275,6 +276,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const updateSettings = useCallback((s: Settings) => {
     saveSettings(s);
     setSettings(s);
+    applyTheme(s.theme);
   }, []);
 
   const getPhotoUrl = useCallback(async (id: string): Promise<string | null> => {

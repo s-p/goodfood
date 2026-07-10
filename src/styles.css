@@ -1,5 +1,9 @@
-/* ---------- design tokens ---------- */
+/* ---------- design tokens ----------
+   The resolved theme is stamped on <html data-theme="light|dark"> by
+   src/lib/theme.ts (and pre-paint by the inline script in index.html);
+   "system" resolves via matchMedia in JS, so CSS only knows two states. */
 :root {
+  color-scheme: light;
   --page: #f7f6f3;
   --card: #fffefc;
   --card-2: #f0efec;
@@ -27,9 +31,9 @@
   --radius: 18px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --page: #0d0d0d;
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
     --card: #1a1a19;
     --card-2: #242422;
     --ink: #f4f3ef;
@@ -53,7 +57,6 @@
     --e4: #58a05c;
     --e5: #34c759;
     --shadow: none;
-  }
 }
 
 /* ---------- base ---------- */
