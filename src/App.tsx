@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { StoreProvider, useStore } from "./store";
 import { LogScreen } from "./screens/LogScreen";
 import { EntryDetailScreen } from "./screens/EntryDetailScreen";
@@ -50,9 +50,15 @@ function Shell() {
   const { ready, due } = useStore();
   const [route, setRoute] = useState<Route>(() => parseHash());
   const [capture, setCapture] = useState<{ open: boolean; auto: boolean }>(() => {
-    const snap = launchWantsSnap() || loadSettings().snapOnLaunch;
+    // ?a=snap (action button) always opens the camera. The snap-on-launch
+    // setting only applies to a plain launch — never on top of a
+    // notification-driven #/checkin or #/entry deep link.
+    const snap =
+      launchWantsSnap() ||
+      (loadSettings().snapOnLaunch && parseHash().name === "log");
     return { open: snap, auto: snap };
   });
+  const jumpedToDue = useRef(false);
 
   useEffect(() => {
     const onHash = () => setRoute(parseHash());
@@ -60,8 +66,16 @@ function Shell() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  // Notification taps land on #/checkin — nothing else to do; the hash
-  // listener above routes it.
+  // On launch (once), jump straight to the check-in screen when one is due —
+  // this is the promise the iPhone guide makes for closed-app reminders.
+  useEffect(() => {
+    if (!ready || jumpedToDue.current) return;
+    jumpedToDue.current = true;
+    if (due.length > 0 && parseHash().name === "log" && !capture.open) {
+      navigate("/checkin");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
 
   if (!ready) return null;
 

@@ -9,7 +9,7 @@ let dbPromise: Promise<IDBDatabase> | null = null;
 
 function open(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
+  const attempt = new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -25,12 +25,25 @@ function open(): Promise<IDBDatabase> {
         db.createObjectStore("photos", { keyPath: "id" });
       }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      // If the connection dies later (e.g. user clears site data), let the
+      // next call reopen instead of handing out a dead handle forever.
+      req.result.onclose = () => {
+        dbPromise = null;
+      };
+      resolve(req.result);
+    };
     req.onerror = () => reject(req.error);
+  });
+  // A transient open failure must not brick the session — retry next call.
+  dbPromise = attempt.catch((err) => {
+    dbPromise = null;
+    throw err;
   });
   return dbPromise;
 }
 
+/** Reads resolve on request success; writes resolve only on transaction commit. */
 function tx<T>(
   store: string,
   mode: IDBTransactionMode,
@@ -41,8 +54,14 @@ function tx<T>(
       new Promise<T>((resolve, reject) => {
         const t = db.transaction(store, mode);
         const req = fn(t.objectStore(store));
-        req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
+        if (mode === "readwrite") {
+          t.oncomplete = () => resolve(req.result);
+          t.onabort = () => reject(t.error ?? new Error("Transaction aborted"));
+          t.onerror = () => reject(t.error);
+        } else {
+          req.onsuccess = () => resolve(req.result);
+        }
       }),
   );
 }

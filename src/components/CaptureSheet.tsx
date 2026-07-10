@@ -18,8 +18,11 @@ export function CaptureSheet({
   const [preview, setPreview] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [when, setWhen] = useState(() => toLocalInputValue(Date.now()));
+  const [whenTouched, setWhenTouched] = useState(false);
   const [saving, setSaving] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const libraryRef = useRef<HTMLInputElement>(null);
   const triedAuto = useRef(false);
 
   useEffect(() => {
@@ -27,7 +30,7 @@ export function CaptureSheet({
     // in which case the big button below is one tap away.
     if (autoCamera && !triedAuto.current) {
       triedAuto.current = true;
-      setTimeout(() => fileRef.current?.click(), 60);
+      setTimeout(() => cameraRef.current?.click(), 60);
     }
   }, [autoCamera]);
 
@@ -42,9 +45,9 @@ export function CaptureSheet({
     if (preview) URL.revokeObjectURL(preview);
     setPhoto(f);
     setPreview(URL.createObjectURL(f));
-    // Snapping happens right after eating far more often than 30 min later —
-    // refresh the timestamp to "now" when the photo lands.
-    setWhen(toLocalInputValue(Date.now()));
+    // Snapping usually happens right after eating — refresh the timestamp
+    // to "now", but never clobber a time the user deliberately set.
+    if (!whenTouched) setWhen(toLocalInputValue(Date.now()));
   }
 
   const canSave =
@@ -53,6 +56,7 @@ export function CaptureSheet({
   async function save() {
     const eatenAt = fromLocalInputValue(when) ?? Date.now();
     setSaving(true);
+    setError(null);
     try {
       await addEntry({
         photo: mode === "photo" ? (photo ?? undefined) : undefined,
@@ -62,6 +66,12 @@ export function CaptureSheet({
       // First save is the natural moment to ask for notification permission.
       void ensureNotificationPermission();
       onClose();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `Couldn't save: ${err.message}`
+          : "Couldn't save this entry — please try again.",
+      );
     } finally {
       setSaving(false);
     }
@@ -94,32 +104,48 @@ export function CaptureSheet({
         {mode === "photo" && (
           <div className="field">
             <input
-              ref={fileRef}
+              ref={cameraRef}
               type="file"
               accept="image/*"
               capture="environment"
               hidden
               onChange={(e) => onPick(e.target.files?.[0] ?? null)}
             />
+            <input
+              ref={libraryRef}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+            />
             {preview ? (
-              <img
-                src={preview}
-                alt="Your food"
-                className="detail-photo"
-                style={{ maxHeight: 220 }}
-                onClick={() => fileRef.current?.click()}
-              />
+              <>
+                <img
+                  src={preview}
+                  alt="Your food"
+                  className="detail-photo"
+                  style={{ maxHeight: 220 }}
+                  onClick={() => cameraRef.current?.click()}
+                />
+                <div className="field-hint">Tap the photo to retake.</div>
+              </>
             ) : (
-              <button
-                className="btn primary block"
-                style={{ padding: "18px 20px", fontSize: 16 }}
-                onClick={() => fileRef.current?.click()}
-              >
-                <CameraIcon size={22} /> Open camera
-              </button>
-            )}
-            {preview && (
-              <div className="field-hint">Tap the photo to retake.</div>
+              <>
+                <button
+                  className="btn primary block"
+                  style={{ padding: "18px 20px", fontSize: 16 }}
+                  onClick={() => cameraRef.current?.click()}
+                >
+                  <CameraIcon size={22} /> Open camera
+                </button>
+                <button
+                  className="btn quiet block"
+                  style={{ marginTop: 8 }}
+                  onClick={() => libraryRef.current?.click()}
+                >
+                  Choose an existing photo
+                </button>
+              </>
             )}
           </div>
         )}
@@ -142,12 +168,22 @@ export function CaptureSheet({
           <input
             type="datetime-local"
             value={when}
-            onChange={(e) => setWhen(e.target.value)}
+            onChange={(e) => {
+              setWhen(e.target.value);
+              setWhenTouched(true);
+            }}
           />
           <div className="field-hint">
             Backdate this if you're logging something from earlier.
           </div>
         </div>
+
+        {error && <div className="notice error">{error}</div>}
+        {mode === "photo" && !photo && text.trim().length > 0 && (
+          <div className="field-hint" style={{ marginTop: 10 }}>
+            Add a photo to save — or switch to “Describe it” to log text only.
+          </div>
+        )}
 
         <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
           <button className="btn quiet" onClick={onClose}>

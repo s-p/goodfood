@@ -1,6 +1,12 @@
 import { useMemo, useState } from "react";
 import { useStore } from "../store";
-import { computeInsights, type FoodScore } from "../lib/insights";
+import {
+  computeFoodScores,
+  computeInsights,
+  highEnergyFoods,
+  lowEnergyFoods,
+  type FoodScore,
+} from "../lib/insights";
 import { FlagImpactChart } from "../components/FlagImpactChart";
 import type { MealType } from "../lib/types";
 import { MEAL_LABELS } from "../lib/meals";
@@ -12,11 +18,14 @@ export function InsightsScreen() {
   const [meal, setMeal] = useState<MealFilter>("all");
   const data = useMemo(() => computeInsights(entries, checkins), [entries, checkins]);
 
-  const filterFoods = (foods: FoodScore[]) =>
-    meal === "all" ? foods : foods.filter((f) => f.mealTypes.has(meal));
-
-  const high = filterFoods(data.highEnergy).slice(0, 12);
-  const low = filterFoods(data.lowEnergy).slice(0, 12);
+  // Recomputed per meal tab so breakfast really means "eaten at breakfast".
+  const mealFoods = useMemo(
+    () =>
+      computeFoodScores(entries, checkins, meal === "all" ? undefined : meal),
+    [entries, checkins, meal],
+  );
+  const high = highEnergyFoods(mealFoods).slice(0, 12);
+  const low = lowEnergyFoods(mealFoods).slice(0, 12);
 
   const histamine = data.flagImpacts.find((f) => f.flag === "histamine");
   const fat = data.flagImpacts.find((f) => f.flag === "fat");

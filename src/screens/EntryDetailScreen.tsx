@@ -20,6 +20,7 @@ export function EntryDetailScreen({ id, onBack, onCheckin }: {
 
   useEffect(() => {
     let alive = true;
+    setPhoto(null); // never show the previous entry's photo while loading
     if (entry?.source === "photo") {
       void getPhotoUrl(id).then((u) => alive && setPhoto(u));
     }
@@ -97,9 +98,13 @@ export function EntryDetailScreen({ id, onBack, onCheckin }: {
       <div className="card card-pad">
         <div className="field" style={{ marginTop: 0 }}>
           <label>Eaten at</label>
+          {/* Uncontrolled (keyed by entry id) so background re-renders —
+              analysis completing, timers, reloads — can't reset a value
+              the user is mid-way through editing. */}
           <input
+            key={id}
             type="datetime-local"
-            value={toLocalInputValue(entry.eatenAt)}
+            defaultValue={toLocalInputValue(entry.eatenAt)}
             onChange={(e) => {
               const t = fromLocalInputValue(e.target.value);
               if (t) void updateEntry(id, { eatenAt: t });

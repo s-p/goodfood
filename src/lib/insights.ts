@@ -36,7 +36,9 @@ export interface InsightData {
 
 /**
  * Each check-in rates the entries it covers. If an entry appears in several
- * check-ins, the one closest after eating wins.
+ * check-ins, the earliest one *after* eating wins — a check-in taken before
+ * the meal can't describe its effect (5 min of slack absorbs clock fuzz
+ * when users backdate an entry to "just now").
  */
 export function energyByEntry(
   entries: Entry[],
@@ -48,11 +50,9 @@ export function energyByEntry(
     for (const id of c.entryIds) {
       const entry = byId.get(id);
       if (!entry) continue;
+      if (c.at < entry.eatenAt - 5 * 60_000) continue; // pre-meal: irrelevant
       const prev = best.get(id);
-      if (
-        !prev ||
-        Math.abs(c.at - entry.eatenAt) < Math.abs(prev.at - entry.eatenAt)
-      ) {
+      if (!prev || c.at - entry.eatenAt < prev.at - entry.eatenAt) {
         best.set(id, c);
       }
     }
@@ -62,12 +62,20 @@ export function energyByEntry(
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
-export function computeInsights(entries: Entry[], checkins: Checkin[]): InsightData {
+/**
+ * Per-food average energy. When `meal` is given, only entries eaten at that
+ * meal contribute — so the breakfast tab really is "how this food treats you
+ * at breakfast", not a cross-meal average.
+ */
+export function computeFoodScores(
+  entries: Entry[],
+  checkins: Checkin[],
+  meal?: MealType,
+): FoodScore[] {
   const rated = energyByEntry(entries, checkins);
-
-  // ---- per-food scores ----
   const foodAcc = new Map<string, { sum: number; count: number; meals: Set<MealType> }>();
   for (const e of entries) {
+    if (meal && e.mealType !== meal) continue;
     const c = rated.get(e.id);
     if (!c) continue;
     const names = new Set<string>();
@@ -85,7 +93,7 @@ export function computeInsights(entries: Entry[], checkins: Checkin[]): InsightD
       foodAcc.set(name, acc);
     }
   }
-  const foods: FoodScore[] = [...foodAcc.entries()]
+  return [...foodAcc.entries()]
     .map(([name, a]) => ({
       name,
       avgEnergy: round1(a.sum / a.count),
@@ -93,11 +101,24 @@ export function computeInsights(entries: Entry[], checkins: Checkin[]): InsightD
       mealTypes: a.meals,
     }))
     .sort((a, b) => b.avgEnergy - a.avgEnergy || b.count - a.count);
+}
 
-  const highEnergy = foods.filter((f) => f.avgEnergy >= 3.5);
-  const lowEnergy = foods
+export function highEnergyFoods(foods: FoodScore[]): FoodScore[] {
+  return foods.filter((f) => f.avgEnergy >= 3.5);
+}
+
+export function lowEnergyFoods(foods: FoodScore[]): FoodScore[] {
+  return foods
     .filter((f) => f.avgEnergy <= 2.5)
     .sort((a, b) => a.avgEnergy - b.avgEnergy || b.count - a.count);
+}
+
+export function computeInsights(entries: Entry[], checkins: Checkin[]): InsightData {
+  const rated = energyByEntry(entries, checkins);
+
+  const foods = computeFoodScores(entries, checkins);
+  const highEnergy = highEnergyFoods(foods);
+  const lowEnergy = lowEnergyFoods(foods);
 
   // ---- per-flag impact ----
   const flagImpacts: FlagImpact[] = FLAG_KEYS.map((flag) => {

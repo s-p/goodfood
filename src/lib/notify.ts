@@ -30,6 +30,9 @@ export function scheduleCheckinTimer(entry: Entry, onDue: () => void) {
   cancelCheckinTimer(entry.id);
   const delay = checkinDueAt(entry) - Date.now();
   if (delay <= 0) return;
+  // setTimeout treats delays > 2^31-1 ms as 0 — a far-future (mis-typed)
+  // eatenAt would fire instantly. Anything beyond a day is pointless anyway.
+  if (delay > 24 * 60 * 60 * 1000) return;
   timers.set(
     entry.id,
     setTimeout(() => {
@@ -46,7 +49,10 @@ export function cancelCheckinTimer(id: string) {
   timers.delete(id);
 }
 
-export async function showCheckinNotification(entry: Entry) {
+export async function showCheckinNotification(
+  entry: Entry,
+  opts?: { test?: boolean },
+) {
   if (!("Notification" in window) || Notification.permission !== "granted") return;
   const title = "How are you feeling?";
   const body = `You had ${entry.analysis?.title ?? entry.text ?? "something"} ${loadSettings().checkinDelayMin} min ago — quick energy check?`;
@@ -58,7 +64,8 @@ export async function showCheckinNotification(entry: Entry) {
         tag: `checkin-${entry.id}`,
         icon: "./icons/icon-192.png",
         badge: "./icons/icon-192.png",
-        data: { entryId: entry.id },
+        // `test` tells the SW not to persist a check-in for this one.
+        data: { entryId: entry.id, test: opts?.test ?? false },
         // 1-tap logging on platforms that support notification actions
         // (Android/desktop). iOS ignores actions; tapping opens the app.
         actions: [

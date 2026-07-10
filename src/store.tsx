@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { db, uid } from "./lib/db";
-import type { Checkin, Entry, MealType } from "./lib/types";
+import type { Checkin, Entry } from "./lib/types";
 import { mealTypeFor } from "./lib/meals";
 import { analyzeFood, friendlyApiError } from "./lib/analyze";
 import { blobToBase64, resizePhoto } from "./lib/image";
@@ -60,20 +60,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [checkins, setCheckins] = useState<Checkin[]>([]);
   const [settings, setSettings] = useState<Settings>(() => loadSettings());
-  const [, bump] = useState(0); // re-render when a timer fires
+  // Bumped when a foreground check-in timer fires so `due` recomputes.
+  const [tick, setTick] = useState(0);
   const photoUrls = useRef(new Map<string, string>());
+  // Every local mutation bumps this; reload() discards snapshots that were
+  // read before a mutation landed, so stale DB reads can't clobber state.
+  const mutationSeq = useRef(0);
 
   const reload = useCallback(async () => {
-    const [e, c] = await Promise.all([db.allEntries(), db.allCheckins()]);
-    e.sort((a, b) => b.eatenAt - a.eatenAt);
-    c.sort((a, b) => b.at - a.at);
-    setEntries(e);
-    setCheckins(c);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const seqAtRead = mutationSeq.current;
+      const [e, c] = await Promise.all([db.allEntries(), db.allCheckins()]);
+      if (mutationSeq.current !== seqAtRead) continue; // raced a write, retry
+      e.sort((a, b) => b.eatenAt - a.eatenAt);
+      c.sort((a, b) => b.at - a.at);
+      setEntries(e);
+      setCheckins(c);
+      break;
+    }
     void updateAppBadge();
   }, []);
 
   useEffect(() => {
-    void reload().then(() => setReady(true));
+    // Even if the very first read fails (private mode, quota), render the
+    // app so Settings/Guide remain reachable instead of a blank screen.
+    void reload()
+      .catch(() => {})
+      .finally(() => setReady(true));
   }, [reload]);
 
   // The service worker writes check-ins from notification actions; refresh
@@ -86,6 +99,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (document.visibilityState === "visible") void reload();
     };
     navigator.serviceWorker?.addEventListener("message", onMessage);
+    // Without this, messages sent before a listener attaches are queued
+    // forever in some browsers.
+    navigator.serviceWorker?.startMessages?.();
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       navigator.serviceWorker?.removeEventListener("message", onMessage);
@@ -99,8 +115,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   );
   const due = useMemo(
     () => dueCheckins(entries, checkedIds),
+    // tick: timers firing move entries into "due" without any data change.
+    // checkinDelayMin: changing the delay moves the due boundary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entries, checkedIds, ready],
+    [entries, checkedIds, tick, settings.checkinDelayMin],
   );
 
   // Keep foreground timers armed for every entry still awaiting its check-in.
@@ -108,52 +126,70 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     for (const e of entries) {
       if (!checkedIds.has(e.id)) {
         scheduleCheckinTimer(e, () => {
-          bump((n) => n + 1);
+          setTick((n) => n + 1);
           void updateAppBadge();
         });
       } else {
         cancelCheckinTimer(e.id);
       }
     }
-  }, [entries, checkedIds]);
+    // settings.checkinDelayMin: re-arm all timers when the delay changes.
+  }, [entries, checkedIds, settings.checkinDelayMin]);
 
-  const runAnalysis = useCallback(
-    async (entry: Entry) => {
-      const s = loadSettings();
-      if (!s.apiKey) {
-        const noKey: Entry = {
-          ...entry,
-          status: "error",
-          error: "Add your Anthropic API key in Settings to enable analysis.",
-        };
-        await db.putEntry(noKey);
-        setEntries((prev) => prev.map((e) => (e.id === entry.id ? noKey : e)));
-        return;
-      }
-      const analyzing: Entry = { ...entry, status: "analyzing", error: undefined };
-      await db.putEntry(analyzing);
-      setEntries((prev) => prev.map((e) => (e.id === entry.id ? analyzing : e)));
-      try {
-        const photo = entry.source === "photo" ? await db.getPhoto(entry.id) : undefined;
-        const analysis = await analyzeFood(s.apiKey, s.model, {
-          photoBase64: photo ? await blobToBase64(photo.blob) : undefined,
-          text: entry.text,
-          eatenAtLabel: fmtDayTime(entry.eatenAt),
-        });
-        const done: Entry = { ...analyzing, analysis, status: "done" };
-        await db.putEntry(done);
-        setEntries((prev) => prev.map((e) => (e.id === entry.id ? done : e)));
-      } catch (err) {
-        const failed: Entry = {
-          ...analyzing,
-          status: "error",
-          error: friendlyApiError(err),
-        };
-        await db.putEntry(failed);
-        setEntries((prev) => prev.map((e) => (e.id === entry.id ? failed : e)));
-      }
+  /**
+   * Read-modify-write against the *current* DB row. Returns null (and writes
+   * nothing) if the entry was deleted meanwhile — so a completing analysis
+   * can't resurrect a deleted entry or clobber concurrent user edits.
+   */
+  const patchEntry = useCallback(
+    async (id: string, patch: Partial<Entry>): Promise<Entry | null> => {
+      const current = await db.getEntry(id);
+      if (!current) return null;
+      const next: Entry = { ...current, ...patch };
+      await db.putEntry(next);
+      mutationSeq.current++;
+      setEntries((prev) =>
+        prev
+          .map((e) => (e.id === id ? next : e))
+          .sort((a, b) => b.eatenAt - a.eatenAt),
+      );
+      return next;
     },
     [],
+  );
+
+  const runAnalysis = useCallback(
+    async (entryId: string) => {
+      const s = loadSettings();
+      if (!s.apiKey) {
+        await patchEntry(entryId, {
+          status: "error",
+          error: "Add your Anthropic API key in Settings to enable analysis.",
+        });
+        return;
+      }
+      const analyzing = await patchEntry(entryId, {
+        status: "analyzing",
+        error: undefined,
+      });
+      if (!analyzing) return;
+      try {
+        const photo =
+          analyzing.source === "photo" ? await db.getPhoto(entryId) : undefined;
+        const analysis = await analyzeFood(s.apiKey, s.model, {
+          photoBase64: photo ? await blobToBase64(photo.blob) : undefined,
+          text: analyzing.text,
+          eatenAtLabel: fmtDayTime(analyzing.eatenAt),
+        });
+        await patchEntry(entryId, { analysis, status: "done", error: undefined });
+      } catch (err) {
+        await patchEntry(entryId, {
+          status: "error",
+          error: friendlyApiError(err),
+        });
+      }
+    },
+    [patchEntry],
   );
 
   const addEntry = useCallback(
@@ -172,35 +208,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await db.putPhoto({ id: entry.id, blob: resized });
       }
       await db.putEntry(entry);
+      mutationSeq.current++;
       setEntries((prev) =>
         [entry, ...prev].sort((a, b) => b.eatenAt - a.eatenAt),
       );
-      void runAnalysis(entry);
+      void runAnalysis(entry.id);
       void updateAppBadge();
       return entry;
     },
     [runAnalysis],
   );
 
-  const updateEntry: Store["updateEntry"] = useCallback(async (id, patch) => {
-    const current = await db.getEntry(id);
-    if (!current) return;
-    const next: Entry = { ...current, ...patch };
-    if (patch.eatenAt !== undefined && !next.mealTypePinned) {
-      next.mealType = mealTypeFor(patch.eatenAt);
-    }
-    await db.putEntry(next);
-    setEntries((prev) =>
-      prev
-        .map((e) => (e.id === id ? next : e))
-        .sort((a, b) => b.eatenAt - a.eatenAt),
-    );
-    void updateAppBadge();
-  }, []);
+  const updateEntry: Store["updateEntry"] = useCallback(
+    async (id, patch) => {
+      const current = await db.getEntry(id);
+      if (!current) return;
+      const merged: Partial<Entry> = { ...patch };
+      if (
+        patch.eatenAt !== undefined &&
+        !(patch.mealTypePinned ?? current.mealTypePinned)
+      ) {
+        merged.mealType = mealTypeFor(patch.eatenAt);
+      }
+      await patchEntry(id, merged);
+      void updateAppBadge();
+    },
+    [patchEntry],
+  );
 
   const deleteEntry = useCallback(async (id: string) => {
     cancelCheckinTimer(id);
     await db.deleteEntry(id);
+    mutationSeq.current++;
     const url = photoUrls.current.get(id);
     if (url) {
       URL.revokeObjectURL(url);
@@ -212,8 +251,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const reanalyze = useCallback(
     async (id: string) => {
-      const entry = await db.getEntry(id);
-      if (entry) await runAnalysis(entry);
+      await runAnalysis(id);
     },
     [runAnalysis],
   );
@@ -221,6 +259,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const saveCheckin = useCallback(async (c: Omit<Checkin, "id">) => {
     const full: Checkin = { ...c, id: uid() };
     await db.putCheckin(full);
+    mutationSeq.current++;
     setCheckins((prev) => [full, ...prev]);
     for (const entryId of c.entryIds) cancelCheckinTimer(entryId);
     void updateAppBadge();
@@ -228,6 +267,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const removeCheckin = useCallback(async (id: string) => {
     await db.deleteCheckin(id);
+    mutationSeq.current++;
     setCheckins((prev) => prev.filter((c) => c.id !== id));
     void updateAppBadge();
   }, []);
@@ -242,6 +282,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (cached) return cached;
     const rec = await db.getPhoto(id);
     if (!rec) return null;
+    // A concurrent call may have won the race while we awaited.
+    const again = photoUrls.current.get(id);
+    if (again) return again;
     const url = URL.createObjectURL(rec.blob);
     photoUrls.current.set(id, url);
     return url;
@@ -266,6 +309,3 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 }
 
 export type { NewEntryInput };
-export function suggestedMealLabel(mealType: MealType): string {
-  return mealType[0].toUpperCase() + mealType.slice(1);
-}

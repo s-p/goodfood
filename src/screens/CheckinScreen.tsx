@@ -25,13 +25,21 @@ export function CheckinScreen({ onDone, focusEntryId }: {
   // the entry this screen was opened for.
   const candidates = useMemo(() => {
     const cutoff = Date.now() - 4 * 60 * 60 * 1000;
-    const list = entries.filter(
-      (e) =>
-        e.id === focusEntryId ||
-        due.some((d) => d.id === e.id) ||
-        (!checkedIds.has(e.id) && e.eatenAt >= cutoff),
-    );
-    return list.sort((a, b) => b.eatenAt - a.eatenAt).slice(0, 6);
+    const list = entries
+      .filter(
+        (e) =>
+          e.id === focusEntryId ||
+          due.some((d) => d.id === e.id) ||
+          (!checkedIds.has(e.id) && e.eatenAt >= cutoff),
+      )
+      .sort((a, b) => b.eatenAt - a.eatenAt)
+      .slice(0, 6);
+    // The entry this screen was opened for must never be truncated away.
+    const focus = focusEntryId && entries.find((e) => e.id === focusEntryId);
+    if (focus && !list.some((e) => e.id === focus.id)) {
+      list.splice(list.length - 1, 1, focus);
+    }
+    return list;
   }, [entries, due, checkedIds, focusEntryId]);
 
   const [selected, setSelected] = useState<Set<string>>(

@@ -2,14 +2,51 @@ import { useRef, useState } from "react";
 import { useStore } from "../store";
 import { MODEL_OPTIONS } from "../lib/settings";
 import { ensureNotificationPermission, showCheckinNotification } from "../lib/notify";
-import { db, uid } from "../lib/db";
+import { db } from "../lib/db";
 import type { Checkin, Entry } from "../lib/types";
+
+const MEALS = ["breakfast", "lunch", "dinner", "snack"];
+
+/** Imports come from arbitrary files — validate before they enter the DB. */
+function isValidEntry(e: unknown): e is Entry {
+  const x = e as Partial<Entry> | null;
+  return (
+    !!x &&
+    typeof x.id === "string" &&
+    x.id.length > 0 &&
+    typeof x.eatenAt === "number" &&
+    isFinite(x.eatenAt) &&
+    typeof x.createdAt === "number" &&
+    MEALS.includes(x.mealType as string) &&
+    (x.source === "photo" || x.source === "text") &&
+    typeof x.status === "string"
+  );
+}
+
+function isValidCheckin(c: unknown): c is Checkin {
+  const x = c as Partial<Checkin> | null;
+  return (
+    !!x &&
+    typeof x.id === "string" &&
+    x.id.length > 0 &&
+    Array.isArray(x.entryIds) &&
+    x.entryIds.every((i) => typeof i === "string") &&
+    typeof x.at === "number" &&
+    isFinite(x.at) &&
+    typeof x.energy === "number" &&
+    x.energy >= 1 &&
+    x.energy <= 5 &&
+    Array.isArray(x.symptoms) &&
+    x.symptoms.every((s: unknown) => typeof s === "string")
+  );
+}
 
 export function SettingsScreen({ onOpenGuide }: { onOpenGuide: () => void }) {
   const { settings, updateSettings, entries, checkins } = useStore();
   const [notifStatus, setNotifStatus] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [delayDraft, setDelayDraft] = useState(String(settings.checkinDelayMin));
 
   async function testNotification() {
     const ok = await ensureNotificationPermission();
@@ -28,7 +65,8 @@ export function SettingsScreen({ onOpenGuide }: { onOpenGuide: () => void }) {
       text: "a test snack",
       status: "done",
     };
-    await showCheckinNotification(probe);
+    // test: true → the service worker won't persist a check-in for it.
+    await showCheckinNotification(probe, { test: true });
     setNotifStatus("Test notification sent ✓");
   }
 
@@ -48,7 +86,8 @@ export function SettingsScreen({ onOpenGuide }: { onOpenGuide: () => void }) {
     a.href = URL.createObjectURL(blob);
     a.download = `goodfood-export-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
-    URL.revokeObjectURL(a.href);
+    // Revoking synchronously can abort the download in Safari/Firefox.
+    setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
   }
 
   async function importData(file: File) {
@@ -60,17 +99,30 @@ export function SettingsScreen({ onOpenGuide }: { onOpenGuide: () => void }) {
       const existingEntries = new Set(entries.map((e) => e.id));
       const existingCheckins = new Set(checkins.map((c) => c.id));
       let added = 0;
-      for (const e of parsed.entries as Entry[]) {
-        if (!e?.id || existingEntries.has(e.id)) continue;
-        await db.putEntry({ ...e, id: e.id || uid() });
+      let skipped = 0;
+      for (const e of (parsed.entries as unknown[]) ?? []) {
+        if (!isValidEntry(e)) {
+          skipped++;
+          continue;
+        }
+        if (existingEntries.has(e.id)) continue;
+        existingEntries.add(e.id);
+        await db.putEntry(e);
         added++;
       }
-      for (const c of (parsed.checkins ?? []) as Checkin[]) {
-        if (!c?.id || existingCheckins.has(c.id)) continue;
+      for (const c of ((parsed.checkins ?? []) as unknown[])) {
+        if (!isValidCheckin(c)) {
+          skipped++;
+          continue;
+        }
+        if (existingCheckins.has(c.id)) continue;
+        existingCheckins.add(c.id);
         await db.putCheckin(c);
         added++;
       }
-      setImportMsg(`Imported ${added} new records. Reloading…`);
+      setImportMsg(
+        `Imported ${added} new records${skipped ? `, skipped ${skipped} malformed` : ""}. Reloading…`,
+      );
       setTimeout(() => location.reload(), 900);
     } catch (err) {
       setImportMsg(err instanceof Error ? err.message : "Import failed.");
@@ -118,17 +170,20 @@ export function SettingsScreen({ onOpenGuide }: { onOpenGuide: () => void }) {
       <div className="card card-pad">
         <div className="field" style={{ marginTop: 0 }}>
           <label>Remind me after (minutes)</label>
+          {/* Free typing; clamp only when leaving the field — clamping per
+              keystroke makes values like "15" impossible to type. */}
           <input
             type="number"
             min={5}
             max={240}
-            value={settings.checkinDelayMin}
-            onChange={(e) =>
-              updateSettings({
-                ...settings,
-                checkinDelayMin: Math.min(240, Math.max(5, Number(e.target.value) || 30)),
-              })
-            }
+            inputMode="numeric"
+            value={delayDraft}
+            onChange={(e) => setDelayDraft(e.target.value)}
+            onBlur={() => {
+              const n = Math.min(240, Math.max(5, Number(delayDraft) || 30));
+              setDelayDraft(String(n));
+              updateSettings({ ...settings, checkinDelayMin: n });
+            }}
           />
         </div>
         <div className="switch-row">

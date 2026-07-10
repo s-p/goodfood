@@ -5,7 +5,7 @@
   --card-2: #f0efec;
   --ink: #171614;
   --ink-2: #52514e;
-  --muted: #898781;
+  --muted: #6f6d68; /* ≥4.5:1 on both page and card (WCAG AA) */
   --hairline: rgba(20, 18, 12, 0.1);
   --accent: #2e7d46;
   --accent-ink: #ffffff;

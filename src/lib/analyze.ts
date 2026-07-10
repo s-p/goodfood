@@ -105,7 +105,9 @@ export async function analyzeFood(
 
   const response = await client.messages.create({
     model,
-    max_tokens: 4096,
+    // Roomy on purpose: on claude-sonnet-5 adaptive thinking is on by
+    // default and shares this budget — a tight cap truncates mid-answer.
+    max_tokens: 16000,
     system: SYSTEM_PROMPT,
     output_config: {
       format: {
@@ -117,7 +119,11 @@ export async function analyzeFood(
   });
 
   if (response.stop_reason === "refusal") {
-    throw new Error("The model declined to analyze this photo. Try adding a text description.");
+    throw new Error(
+      input.photoBase64
+        ? "The model declined to analyze this photo. Try retaking it or adding a text description."
+        : "The model declined to analyze this entry. Try rewording the description.",
+    );
   }
   if (response.stop_reason === "max_tokens") {
     throw new Error("The analysis was cut short. Please try again.");
