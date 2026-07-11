@@ -1,6 +1,89 @@
 import { ChevronLeft } from "../components/Icons";
+import { isNativeApp } from "../lib/native";
 
 export function GuideScreen({ onBack }: { onBack: () => void }) {
+  return isNativeApp() ? <NativeGuide onBack={onBack} /> : <WebGuide onBack={onBack} />;
+}
+
+/* Shown inside the native iOS app, where everything just works. */
+function NativeGuide({ onBack }: { onBack: () => void }) {
+  return (
+    <div>
+      <div className="back-row">
+        <button className="back-btn" onClick={onBack}>
+          <ChevronLeft /> Back
+        </button>
+      </div>
+      <h1 className="screen-title" style={{ paddingTop: 0 }}>
+        iPhone setup
+      </h1>
+      <p className="screen-sub">
+        You're in the native app — notifications and the Action Button work
+        fully.
+      </p>
+
+      <div className="section-label">1 · Action Button → snap food</div>
+      <div className="card card-pad">
+        <div className="guide-step">
+          <div className="guide-num">1</div>
+          <p>
+            Open the <b>Shortcuts</b> app → <b>+</b> → add the <b>“Open URLs”</b>{" "}
+            action → enter <code>goodfood://snap</code>. Name it “Log food”.
+            This jumps straight into the camera.
+          </p>
+        </div>
+        <div className="guide-step">
+          <div className="guide-num">2</div>
+          <p>
+            iPhone <b>Settings → Action Button</b> → choose <b>Shortcut</b> →
+            pick <b>Log food</b>. Press-and-hold the Action Button: GoodFood
+            opens with the camera ready.
+          </p>
+        </div>
+        <div className="guide-step">
+          <div className="guide-num">3</div>
+          <p>
+            Alternative without the camera jump: use the <b>“Open App”</b>{" "}
+            action → <b>GoodFood</b> — and turn on{" "}
+            <b>Settings → Open camera on launch</b> if you want camera-first
+            there too.
+          </p>
+        </div>
+      </div>
+
+      <div className="section-label">2 · Check-in notifications</div>
+      <div className="card card-pad">
+        <div className="guide-step">
+          <div className="guide-num">1</div>
+          <p>
+            After each logged meal, a reminder is <b>scheduled with iOS</b> —
+            it arrives on time even when the app is closed.
+          </p>
+        </div>
+        <div className="guide-step">
+          <div className="guide-num">2</div>
+          <p>
+            <b>Press and hold</b> the notification: rating buttons appear
+            (🪫 Drained … ⚡ Energized) and your check-in is saved{" "}
+            <b>without opening the app</b>. A plain tap opens the full
+            check-in with symptoms.
+          </p>
+        </div>
+        <div className="guide-step">
+          <div className="guide-num">3</div>
+          <p>
+            Allow notifications when the app asks (after your first save), or
+            enable them later in iPhone <b>Settings → Notifications →
+            GoodFood</b>. Try it via <b>Settings → Notifications → Test</b>.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Shown in the browser / home-screen web app, with its iOS limitations. */
+function WebGuide({ onBack }: { onBack: () => void }) {
   return (
     <div>
       <div className="back-row">
@@ -93,7 +176,9 @@ export function GuideScreen({ onBack }: { onBack: () => void }) {
           <p>
             <b>iOS limitation, honestly:</b> a home-screen web app can't schedule
             a notification for later while it's closed (Apple only allows that
-            via server push, and GoodFood keeps everything on-device).
+            via server push, and GoodFood keeps everything on-device). The{" "}
+            <b>native GoodFood iOS app</b> doesn't have this limit — see the
+            repo's README for building it.
           </p>
         </div>
         <div className="guide-step">
