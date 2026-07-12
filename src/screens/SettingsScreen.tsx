@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useStore } from "../store";
 import { MODEL_OPTIONS } from "../lib/settings";
 import { ensureNotificationPermission, showCheckinNotification } from "../lib/notify";
+import { isNativeApp } from "../lib/native";
 import { db } from "../lib/db";
 import type { Entry } from "../lib/types";
 import { isValidCheckin, isValidEntry } from "../lib/validate";
@@ -71,7 +72,11 @@ export function SettingsScreen({ onOpenGuide }: { onOpenGuide: () => void }) {
     };
     // test: true → the service worker won't persist a check-in for it.
     await showCheckinNotification(probe, { test: true });
-    setNotifStatus("Test notification sent ✓");
+    setNotifStatus(
+      isNativeApp()
+        ? "Test scheduled — it arrives in ~2 s. Press & hold it to see the rating buttons."
+        : "Test notification sent ✓",
+    );
   }
 
   function exportData() {
@@ -194,7 +199,9 @@ export function SettingsScreen({ onOpenGuide }: { onOpenGuide: () => void }) {
           <div>
             <div className="title">Notifications</div>
             <div className="sub">
-              Fire while the app is open; the badge covers the rest.
+              {isNativeApp()
+                ? "Arrive even when the app is closed — press & hold to rate."
+                : "Fire while the app is open; the badge covers the rest."}
             </div>
           </div>
           <button className="btn quiet" onClick={testNotification} style={{ padding: "8px 14px" }}>

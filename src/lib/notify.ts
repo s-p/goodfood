@@ -1,17 +1,25 @@
 import { db } from "./db";
 import type { Entry } from "./types";
 import { loadSettings } from "./settings";
+import {
+  ensureNativeNotificationPermission,
+  isNativeApp,
+  showNativeTestNotification,
+} from "./native";
 
 // Scheduling model, honestly:
-//  - While the app is open (foreground tab), a timer fires the notification /
-//    in-app prompt exactly on time.
+//  - Native app (Capacitor iOS): check-in notifications are pre-scheduled
+//    with the OS (lib/native.ts) and fire on time even when the app is
+//    closed, with press-and-hold energy actions.
+//  - While the web app is open (foreground tab), a timer fires the
+//    notification / in-app prompt exactly on time.
 //  - iOS home-screen web apps cannot schedule local notifications while
 //    closed (no push server here — everything stays on-device). Instead:
 //    the app badge shows due check-ins, and opening the app jumps straight
 //    to the check-in screen. The setup guide shows an optional Shortcuts
 //    reminder for a guaranteed nudge.
-//  - On Android/desktop the notification carries 1-tap energy actions that
-//    are saved by the service worker without opening the app.
+//  - On Android/desktop web the notification carries 1-tap energy actions
+//    that are saved by the service worker without opening the app.
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -20,6 +28,7 @@ export function checkinDueAt(entry: Entry): number {
 }
 
 export async function ensureNotificationPermission(): Promise<boolean> {
+  if (isNativeApp()) return ensureNativeNotificationPermission();
   if (!("Notification" in window)) return false;
   if (Notification.permission === "granted") return true;
   if (Notification.permission === "denied") return false;
@@ -53,6 +62,12 @@ export async function showCheckinNotification(
   entry: Entry,
   opts?: { test?: boolean },
 ) {
+  if (isNativeApp()) {
+    // Real check-ins are already pre-scheduled with the OS and would fire
+    // twice otherwise; only the Settings "Test" needs an on-demand one.
+    if (opts?.test) await showNativeTestNotification(entry);
+    return;
+  }
   if (!("Notification" in window) || Notification.permission !== "granted") return;
   const title = "How are you feeling?";
   const body = `You had ${entry.analysis?.title ?? entry.text ?? "something"} ${loadSettings().checkinDelayMin} min ago — quick energy check?`;

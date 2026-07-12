@@ -1,0 +1,6 @@
+{
+  "$comment": "Native iOS shell around the same web app (see ios/). `npx cap sync ios` copies the dist/ build into the app bundle. If Xcode reports the appId as taken, change it to your own reverse-domain id — it must be globally unique per Apple account. JSON (not .ts) because the Capacitor CLI's TS config loader is incompatible with the typescript@7 native compiler.",
+  "appId": "app.goodfood.tracker",
+  "appName": "GoodFood",
+  "webDir": "dist"
+}

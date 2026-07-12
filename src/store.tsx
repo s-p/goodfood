@@ -22,6 +22,10 @@ import {
 import { loadSettings, saveSettings, type Settings } from "./lib/settings";
 import { applyTheme } from "./lib/theme";
 import { runBackup } from "./lib/backup";
+import {
+  initNativeNotifications,
+  syncNativeCheckinNotifications,
+} from "./lib/native";
 import { fmtDayTime } from "./lib/format";
 
 interface NewEntryInput {
@@ -91,6 +95,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       .finally(() => setReady(true));
   }, [reload]);
 
+  // Native app: notification actions save check-ins in the background
+  // (lib/native.ts). Bump mutationSeq so the auto-backup below picks the
+  // new record up too, then reload state from the DB.
+  useEffect(() => {
+    void initNativeNotifications(() => {
+      mutationSeq.current++;
+      void reload();
+    });
+  }, [reload]);
+
   // The service worker writes check-ins from notification actions; refresh
   // when it tells us, and whenever the app comes back to the foreground.
   useEffect(() => {
@@ -148,6 +162,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (backupTimer.current) clearTimeout(backupTimer.current);
     };
   }, [entries, checkins, ready, settings.backupAuto, settings.githubToken]);
+
+  // Native app: keep the OS notification schedule in sync — one pending
+  // check-in notification (with press-and-hold energy actions) per entry
+  // still awaiting its check-in. Fires even when the app is closed.
+  useEffect(() => {
+    if (!ready) return;
+    void syncNativeCheckinNotifications(entries, checkedIds);
+  }, [ready, entries, checkedIds, settings.checkinDelayMin]);
 
   // Keep foreground timers armed for every entry still awaiting its check-in.
   useEffect(() => {

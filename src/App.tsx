@@ -9,6 +9,8 @@ import { GuideScreen } from "./screens/GuideScreen";
 import { CaptureSheet } from "./components/CaptureSheet";
 import { CameraIcon, ChartIcon, GearIcon, ListIcon } from "./components/Icons";
 import { loadSettings } from "./lib/settings";
+import { isNativeApp } from "./lib/native";
+import { App as CapApp } from "@capacitor/app";
 
 type Route =
   | { name: "log" }
@@ -64,6 +66,22 @@ function Shell() {
     const onHash = () => setRoute(parseHash());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  // Native app: `goodfood://snap` (Shortcuts / Action Button) jumps straight
+  // into the camera — both on a cold start and while already running.
+  useEffect(() => {
+    if (!isNativeApp()) return;
+    const openSnap = (url?: string | null) => {
+      if (url?.includes("snap")) setCapture({ open: true, auto: true });
+    };
+    CapApp.getLaunchUrl()
+      .then((r) => openSnap(r?.url))
+      .catch(() => {});
+    const sub = CapApp.addListener("appUrlOpen", (e) => openSnap(e.url));
+    return () => {
+      sub.then((s) => s.remove()).catch(() => {});
+    };
   }, []);
 
   // On launch (once), jump straight to the check-in screen when one is due —
