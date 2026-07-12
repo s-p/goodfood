@@ -2,7 +2,7 @@
 
 All notable changes to GoodFood. Newest first.
 
-## Unreleased — Native iOS app ([#5](https://github.com/s-p/goodfood/pull/5))
+## 2026-07-12 — Native iOS app ([#5](https://github.com/s-p/goodfood/pull/5))
 
 ### Added
 - **Native iOS app** (Capacitor shell around the unchanged web app, `ios/`
